@@ -1,0 +1,21 @@
+# --- GERAL ---
+node_modules/
+.DS_Store
+Thumbs.db
+.vscode/
+*.log
+
+# --- BACKEND ---
+backend/.env
+
+# --- MOBILE ---
+.expo/
+dist/
+web-build/
+
+# Ignora o arquivo com IP
+mobile/api-config.ts
+
+# futuro
+mobile/android/
+mobile/ios/
