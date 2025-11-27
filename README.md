@@ -1,7 +1,7 @@
 # GeoTrip Journal 🌍✈️
 
 ![Status](https://img.shields.io/badge/status-concluído-green)
-![Tech](https://img.shields.io/badge/stack-Node.js%20|%20React%20Native-blueviolet)
+![Tech](https://img.shields.io/badge/stack-Node.js%20|%20React%20Native-blue)
 ![Banco de Dados](https://img.shields.io/badge/database-MongoDB-green)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-red)](./LICENSE)
 
