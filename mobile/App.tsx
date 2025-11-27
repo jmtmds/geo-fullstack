@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, FlatList, TextInput, TouchableOpacity, Alert, SafeAreaView, StatusBar, Platform } from 'react-native';
+import { StyleSheet, Text, View, FlatList, TextInput, TouchableOpacity, Alert, SafeAreaView, StatusBar, Platform, Image, Linking } from 'react-native';
 import axios from 'axios';
-// Importamos a URL do arquivo secreto
-import { API_URL } from './api-config'; 
+import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
+import { Feather } from '@expo/vector-icons';
+import { API_URL } from './api-config';
 
 interface Place {
   _id: string;
@@ -10,120 +12,214 @@ interface Place {
   description: string;
   latitude: number;
   longitude: number;
+  photo?: string | null;
 }
 
 export default function App() {
   const [places, setPlaces] = useState<Place[]>([]);
+  
+  // Form States
+  const [idToEdit, setIdToEdit] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [location, setLocation] = useState<Location.LocationObject | null>(null);
 
-  // Função para buscar locais do backend
+  // --- 1. Permissões e Carregamento Inicial ---
+  useEffect(() => {
+    (async () => {
+      // Pedir permissão de GPS
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Erro', 'Precisamos da permissão de localização!');
+        return;
+      }
+      // Pegar localização atual
+      let loc = await Location.getCurrentPositionAsync({});
+      setLocation(loc);
+      
+      // Pedir permissão de Câmera (Opcional, mas bom garantir)
+      await ImagePicker.requestCameraPermissionsAsync();
+      
+      fetchPlaces();
+    })();
+  }, []);
+
+  // --- 2. Funções de API ---
   const fetchPlaces = async () => {
     try {
       const response = await axios.get(API_URL);
       setPlaces(response.data);
     } catch (error) {
-      console.error("Erro ao buscar locais:", error);
-      Alert.alert("Erro", "Não foi possível conectar ao backend.\nVerifique se o IP está correto em api-config.ts");
+      console.log(error);
     }
   };
 
-  // Função para salvar (lat/long fixos de Recife para teste)
   const handleSave = async () => {
-    if (!title.trim() || !description.trim()) {
-      Alert.alert("Atenção", "Preencha título e descrição.");
-      return;
-    }
-    
+    if (!title.trim() || !description.trim()) return Alert.alert("Preencha os campos!");
+    if (!location) return Alert.alert("Aguardando GPS...");
+
+    const payload = {
+      title,
+      description,
+      latitude: location.coords.latitude,
+      longitude: location.coords.longitude,
+      photo
+    };
+
     try {
-      await axios.post(API_URL, {
-        title,
-        description,
-        latitude: -8.050000, 
-        longitude: -34.900000,
-        photo: null 
-      });
-      
-      setTitle('');
-      setDescription('');
-      fetchPlaces(); // Atualiza a lista
-      Alert.alert("Sucesso", "Local salvo!");
+      if (idToEdit) {
+        // Editando (PUT)
+        await axios.put(`${API_URL}/${idToEdit}`, payload);
+        Alert.alert("Sucesso", "Local atualizado!");
+      } else {
+        // Criando (POST)
+        await axios.post(API_URL, payload);
+        Alert.alert("Sucesso", "Local salvo!");
+      }
+      resetForm();
+      fetchPlaces();
     } catch (error) {
-      console.error("Erro ao salvar:", error);
-      Alert.alert("Erro", "Falha ao salvar o local.");
+      Alert.alert("Erro", "Falha ao salvar.");
     }
   };
 
-  useEffect(() => {
-    fetchPlaces();
-  }, []);
+  const handleDelete = async (id: string) => {
+    try {
+      await axios.delete(`${API_URL}/${id}`);
+      fetchPlaces();
+    } catch (error) {
+      Alert.alert("Erro", "Falha ao deletar.");
+    }
+  };
 
+  // --- 3. Funcionalidades Extras ---
+  const takePhoto = async () => {
+    let result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.5, // Qualidade reduzida para não pesar no banco (base64)
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0].base64) {
+      setPhoto(`data:image/jpeg;base64,${result.assets[0].base64}`);
+    }
+  };
+
+  const startEdit = (item: Place) => {
+    setIdToEdit(item._id);
+    setTitle(item.title);
+    setDescription(item.description);
+    setPhoto(item.photo || null);
+    // Mantemos a localização atual do GPS para atualizar, ou poderíamos usar a do item
+  };
+
+  const resetForm = () => {
+    setIdToEdit(null);
+    setTitle('');
+    setDescription('');
+    setPhoto(null);
+  };
+
+  const openMap = (lat: number, long: number) => {
+    const url = Platform.OS === 'ios' 
+      ? `maps:0,0?q=${lat},${long}` 
+      : `geo:0,0?q=${lat},${long}(Local)`;
+    Linking.openURL(url);
+  };
+
+  // --- 4. Renderização ---
   const renderItem = ({ item }: { item: Place }) => (
     <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>{item.title}</Text>
-        <Text style={styles.cardCoords}>{item.latitude.toFixed(4)}, {item.longitude.toFixed(4)}</Text>
+      {item.photo && <Image source={{ uri: item.photo }} style={styles.cardImage} />}
+      
+      <View style={styles.cardContent}>
+        <View style={styles.row}>
+          <Text style={styles.cardTitle}>{item.title}</Text>
+          <View style={styles.actions}>
+            <TouchableOpacity onPress={() => startEdit(item)}><Feather name="edit" size={20} color="#4F46E5" /></TouchableOpacity>
+            <TouchableOpacity onPress={() => handleDelete(item._id)}><Feather name="trash-2" size={20} color="#EF4444" /></TouchableOpacity>
+          </View>
+        </View>
+        
+        <Text style={styles.desc}>{item.description}</Text>
+        
+        <TouchableOpacity style={styles.mapBtn} onPress={() => openMap(item.latitude, item.longitude)}>
+          <Feather name="map-pin" size={14} color="#FFF" />
+          <Text style={styles.mapBtnText}> Ver no Mapa</Text>
+        </TouchableOpacity>
       </View>
-      <Text style={styles.cardDesc}>{item.description}</Text>
     </View>
   );
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
-      
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>🗺️ Diário de Viagem</Text>
-      </View>
+      <StatusBar barStyle="dark-content" />
+      <Text style={styles.headerTitle}>📸 Geo Diário</Text>
 
       <View style={styles.form}>
-        <TextInput 
-          style={styles.input} 
-          placeholder="Nome do Local (ex: Torre Eiffel)" 
-          value={title} 
-          onChangeText={setTitle} 
-        />
-        <TextInput 
-          style={styles.input} 
-          placeholder="Descrição (ex: Vista incrível!)" 
-          value={description} 
-          onChangeText={setDescription} 
-        />
-        <TouchableOpacity style={styles.button} onPress={handleSave}>
-          <Text style={styles.buttonText}>Salvar Local</Text>
+        <TouchableOpacity style={styles.cameraBtn} onPress={takePhoto}>
+          {photo ? (
+            <Image source={{ uri: photo }} style={styles.previewImage} />
+          ) : (
+            <View style={styles.cameraPlaceholder}>
+              <Feather name="camera" size={24} color="#666" />
+              <Text style={{color: '#666'}}>Tirar Foto</Text>
+            </View>
+          )}
         </TouchableOpacity>
+
+        <TextInput style={styles.input} placeholder="Nome do Local" value={title} onChangeText={setTitle} />
+        <TextInput style={styles.input} placeholder="Descrição" value={description} onChangeText={setDescription} />
+        
+        <View style={styles.rowBtn}>
+          {idToEdit && (
+            <TouchableOpacity style={[styles.button, styles.cancelBtn]} onPress={resetForm}>
+              <Text style={styles.buttonText}>Cancelar</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={[styles.button, styles.saveBtn]} onPress={handleSave}>
+            <Text style={styles.buttonText}>{idToEdit ? 'Atualizar' : 'Salvar Local'}</Text>
+          </TouchableOpacity>
+        </View>
+        
+        {location && <Text style={styles.gpsText}>📍 GPS Ativo: {location.coords.latitude.toFixed(4)}, {location.coords.longitude.toFixed(4)}</Text>}
       </View>
 
-      <Text style={styles.subTitle}>Locais Salvos ({places.length})</Text>
-
-      <FlatList
-        data={places}
-        keyExtractor={(item) => item._id}
-        renderItem={renderItem}
-        contentContainerStyle={styles.list}
-        ListEmptyComponent={<Text style={styles.empty}>Nenhum local salvo ainda.</Text>}
-      />
+      <FlatList data={places} keyExtractor={i => i._id} renderItem={renderItem} contentContainerStyle={styles.list} />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5', paddingTop: Platform.OS === 'android' ? 30 : 0 },
-  header: { padding: 20, backgroundColor: '#fff', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#eee' },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#333' },
+  container: { flex: 1, backgroundColor: '#F3F4F6', paddingTop: 40 },
+  headerTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 10, color: '#111827' },
+  form: { backgroundColor: '#FFF', padding: 20, margin: 16, borderRadius: 16, elevation: 4 },
   
-  form: { padding: 20 },
-  input: { backgroundColor: '#fff', padding: 15, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: '#ddd' },
-  button: { backgroundColor: '#4F46E5', padding: 15, borderRadius: 10, alignItems: 'center' },
-  buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  cameraBtn: { alignSelf: 'center', marginBottom: 15 },
+  cameraPlaceholder: { width: 100, height: 100, borderRadius: 10, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' },
+  previewImage: { width: 100, height: 100, borderRadius: 10 },
+  
+  input: { backgroundColor: '#F9FAFB', padding: 12, borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB' },
+  
+  rowBtn: { flexDirection: 'row', gap: 10 },
+  button: { flex: 1, padding: 14, borderRadius: 8, alignItems: 'center' },
+  saveBtn: { backgroundColor: '#4F46E5' },
+  cancelBtn: { backgroundColor: '#6B7280' },
+  buttonText: { color: '#FFF', fontWeight: 'bold' },
+  gpsText: { textAlign: 'center', marginTop: 10, color: '#10B981', fontSize: 12 },
 
-  subTitle: { fontSize: 18, fontWeight: 'bold', marginLeft: 20, marginBottom: 10, color: '#555' },
-  list: { paddingHorizontal: 20, paddingBottom: 50 },
-  empty: { textAlign: 'center', marginTop: 20, color: '#999' },
-
-  card: { backgroundColor: '#fff', padding: 15, marginBottom: 12, borderRadius: 12, elevation: 2, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
-  cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
-  cardCoords: { fontSize: 12, color: '#888', alignSelf: 'center' },
-  cardDesc: { color: '#666', fontSize: 14 }
+  list: { paddingHorizontal: 16 },
+  card: { backgroundColor: '#FFF', borderRadius: 12, marginBottom: 16, overflow: 'hidden', elevation: 2 },
+  cardImage: { width: '100%', height: 150 },
+  cardContent: { padding: 15 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  actions: { flexDirection: 'row', gap: 15 },
+  cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1F2937' },
+  desc: { color: '#6B7280', marginVertical: 5 },
+  
+  mapBtn: { flexDirection: 'row', backgroundColor: '#059669', padding: 8, borderRadius: 6, alignSelf: 'flex-start', marginTop: 8, alignItems: 'center' },
+  mapBtnText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' }
 });

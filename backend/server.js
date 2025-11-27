@@ -54,6 +54,31 @@ app.post('/api/places', async (req, res) => {
   }
 });
 
+// (PUT)
+app.put('/api/places/:id', async (req, res) => {
+  try {
+    const { title, description, latitude, longitude, photo } = req.body;
+    const updatedPlace = await Place.findByIdAndUpdate(
+      req.params.id,
+      { title, description, latitude, longitude, photo },
+      { new: true }
+    );
+    res.json(updatedPlace);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao editar' });
+  }
+});
+
+// (DELETE)
+app.delete('/api/places/:id', async (req, res) => {
+  try {
+    await Place.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Deletado com sucesso' });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao deletar' });
+  }
+});
+
 mongoose
   .connect(MONGO_URI, { })
   .then(() => {
